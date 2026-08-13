@@ -298,3 +298,70 @@ const frontendBucketPolicy = new aws.s3.BucketPolicy(
 
 export const frontendBucketName = frontendBucket.id;
 export const frontendWebsiteUrl = frontendBucket.websiteEndpoint;
+
+const githubOidcProvider = new aws.iam.OpenIdConnectProvider("github-oidc", {
+  url: "https://token.actions.githubusercontent.com",
+  clientIdLists: ["sts.amazonaws.com"],
+});
+
+const githubDeployRole = new aws.iam.Role("github-deploy-role", {
+  assumeRolePolicy: pulumi
+    .all([githubOidcProvider.arn])
+    .apply(([providerArn]) =>
+      JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Principal: {
+              Federated: providerArn,
+            },
+            Action: "sts:AssumeRoleWithWebIdentity",
+            Condition: {
+              StringEquals: {
+                "token.actions.githubusercontent.com:aud":
+                  "sts.amazonaws.com",
+              },
+              StringLike: {
+                "token.actions.githubusercontent.com:sub":
+                  "repo:Geccobot/cloud-cicd-project:ref:refs/heads/main",
+              },
+            },
+          },
+        ],
+      })
+    ),
+});
+
+const githubDeployPolicy = new aws.iam.RolePolicy(
+  "github-deploy-policy",
+  {
+    role: githubDeployRole.id,
+    policy: frontendBucket.arn.apply((bucketArn) =>
+      JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: [
+              "s3:ListBucket",
+              "s3:GetBucketLocation",
+            ],
+            Resource: bucketArn,
+          },
+          {
+            Effect: "Allow",
+            Action: [
+              "s3:PutObject",
+              "s3:DeleteObject",
+              "s3:GetObject",
+            ],
+            Resource: `${bucketArn}/*`,
+          },
+        ],
+      })
+    ),
+  }
+);
+
+export const githubDeployRoleArn = githubDeployRole.arn;
