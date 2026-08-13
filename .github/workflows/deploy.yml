@@ -110,7 +110,7 @@ jobs:
       - name: Configure SSH key
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/cloud-cicd-key
+          echo "${{ secrets.EC2_SSH_KEY }}" | base64 --decode > ~/.ssh/cloud-cicd-key
           chmod 600 ~/.ssh/cloud-cicd-key
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
