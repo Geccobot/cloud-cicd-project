@@ -321,9 +321,10 @@ const githubDeployRole = new aws.iam.Role("github-deploy-role", {
               StringEquals: {
                 "token.actions.githubusercontent.com:aud":
                   "sts.amazonaws.com",
-
+              },
+              StringLike: {
                 "token.actions.githubusercontent.com:sub":
-                  "repo:Geccobot/cloud-cicd-project:ref:refs/heads/main",
+                  "repo:Geccobot/cloud-cicd-project:*",
               },
             },
           },
