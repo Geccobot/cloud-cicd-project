@@ -1,0 +1,192 @@
+name: Build, Test and Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    name: Test Applications
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------- BACKEND ----------
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      # ---------- FRONTEND ----------
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test -- --watchAll=false
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+        run: npm run build
+
+
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: test
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build production frontend
+        working-directory: frontend
+        env:
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy frontend to S3
+        run: |
+          aws s3 sync frontend/build s3://${{ secrets.S3_BUCKET_NAME }} --delete
+
+
+  deploy-backend:
+    name: Deploy Backend
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build backend Docker image
+        run: |
+          docker build -t cloud-cicd-backend ./backend
+          docker save cloud-cicd-backend -o cloud-cicd-backend.tar
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/cloud-cicd-key
+          chmod 600 ~/.ssh/cloud-cicd-key
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy Docker image to EC2
+        run: |
+          scp -i ~/.ssh/cloud-cicd-key \
+            cloud-cicd-backend.tar \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/${{ secrets.EC2_USER }}/cloud-cicd-backend.tar
+
+      - name: Deploy backend with rollback
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+        run: |
+          ssh -i ~/.ssh/cloud-cicd-key "$EC2_USER@$EC2_HOST" \
+          "DB_HOST='$DB_HOST' DB_USER='$DB_USER' DB_PASSWORD='$DB_PASSWORD' DB_NAME='$DB_NAME' DB_PORT='$DB_PORT' bash -s" <<'REMOTE'
+            set -e
+
+            echo "Loading new Docker image..."
+            docker load -i /home/$USER/cloud-cicd-backend.tar
+
+            # Preserve the currently running image for rollback.
+            if docker container inspect cloud-backend >/dev/null 2>&1; then
+              echo "Saving previous backend image..."
+              OLD_IMAGE=$(docker inspect --format='{{.Image}}' cloud-backend)
+              docker tag "$OLD_IMAGE" cloud-cicd-backend:rollback
+
+              docker stop cloud-backend || true
+              docker rm cloud-backend || true
+            fi
+
+            echo "Starting new backend..."
+            docker run -d \
+              --name cloud-backend \
+              --restart unless-stopped \
+              -p 5000:5000 \
+              -e DB_USER="$DB_USER" \
+              -e DB_HOST="$DB_HOST" \
+              -e DB_NAME="$DB_NAME" \
+              -e DB_PASSWORD="$DB_PASSWORD" \
+              -e DB_PORT="$DB_PORT" \
+              -e PORT=5000 \
+              cloud-cicd-backend:latest
+
+            echo "Waiting for API..."
+            sleep 10
+
+            if curl --fail http://localhost:5000/api/health; then
+              echo "Backend deployment successful."
+              docker image rm cloud-cicd-backend:rollback || true
+            else
+              echo "Health check failed. Rolling back."
+
+              docker logs cloud-backend || true
+              docker stop cloud-backend || true
+              docker rm cloud-backend || true
+
+              if docker image inspect cloud-cicd-backend:rollback >/dev/null 2>&1; then
+                docker run -d \
+                  --name cloud-backend \
+                  --restart unless-stopped \
+                  -p 5000:5000 \
+                  -e DB_USER="$DB_USER" \
+                  -e DB_HOST="$DB_HOST" \
+                  -e DB_NAME="$DB_NAME" \
+                  -e DB_PASSWORD="$DB_PASSWORD" \
+                  -e DB_PORT="$DB_PORT" \
+                  -e PORT=5000 \
+                  cloud-cicd-backend:rollback
+              fi
+
+              exit 1
+            fi
+          REMOTE
