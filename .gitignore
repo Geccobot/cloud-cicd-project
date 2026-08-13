@@ -1,0 +1,14 @@
+frontend/node_modules
+frontend/build
+frontend/.env
+
+backend/node_modules
+backend/dist
+backend/.env
+
+infrastructure/node_modules
+
+*.tar
+*.pem
+
+.DS_Store

@@ -1,0 +1,6 @@
+config:
+  aws:region: us-east-1
+  cloud-cicd-infrastructure:dbUsername: postgresadmin
+  cloud-cicd-infrastructure:dbPassword:
+    secure: AAABAI8X9hgaPrZMyugRUD2/YIjnfv7Bu/g3ZLyZm6Tsdg5PvcVj6J9B
+  cloud-cicd-infrastructure:sshPublicKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB8W+Z4ZbfdX99CgqpphJuqYLolwxQ1dUjZzm69h+A22 cloud-cicd-deploy
