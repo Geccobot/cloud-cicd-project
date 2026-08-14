@@ -168,6 +168,10 @@ jobs:
             docker run -d \
               --name cloud-backend \
               --restart unless-stopped \
+              --log-driver=awslogs \
+              --log-opt awslogs-region=us-east-1 \
+              --log-opt awslogs-group=/cloud-cicd/backend \
+              --log-opt awslogs-stream=cloud-backend \
               -p 5000:5000 \
               -e DB_USER="$DB_USER" \
               -e DB_HOST="$DB_HOST" \
@@ -194,6 +198,10 @@ jobs:
                 docker run -d \
                   --name cloud-backend \
                   --restart unless-stopped \
+                  --log-driver=awslogs \
+                  --log-opt awslogs-region=us-east-1 \
+                  --log-opt awslogs-group=/cloud-cicd/backend \
+                  --log-opt awslogs-stream=cloud-backend \
                   -p 5000:5000 \
                   -e DB_USER="$DB_USER" \
                   -e DB_HOST="$DB_HOST" \
