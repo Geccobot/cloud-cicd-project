@@ -10,6 +10,26 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.use((req, res, next) => {
+  const start = Date.now();
+
+  res.on("finish", () => {
+    const responseTime = Date.now() - start;
+
+    console.log(
+      JSON.stringify({
+        type: "api_request",
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        responseTime,
+      })
+    );
+  });
+
+  next();
+});
+
 const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
