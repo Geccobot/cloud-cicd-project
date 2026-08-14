@@ -94,6 +94,11 @@ jobs:
             console.log("OIDC sub:", payload.sub);
             console.log("OIDC aud:", payload.aud);
 
+      - name: Inspect OIDC token
+        uses: github/actions-oidc-debugger@main
+        with:
+          audience: sts.amazonaws.com
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
