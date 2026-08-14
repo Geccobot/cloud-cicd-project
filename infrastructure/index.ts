@@ -214,6 +214,13 @@ const ec2Role = new aws.iam.Role("backend-ec2-role", {
   }),
 });
 
+const cloudWatchAgentPolicy =
+  new aws.iam.RolePolicyAttachment("cloudwatch-agent-policy", {
+    role: ec2Role.name,
+    policyArn:
+      "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+  });
+
 const ec2InstanceProfile = new aws.iam.InstanceProfile(
   "backend-instance-profile",
   {
@@ -332,35 +339,114 @@ const githubDeployRole = new aws.iam.Role("github-deploy-role", {
     ),
 });
 
+const deploymentAlertsTopic = new aws.sns.Topic("deployment-alerts-topic", {
+  name: "cloud-cicd-deployment-alerts",
+});
+
 const githubDeployPolicy = new aws.iam.RolePolicy(
   "github-deploy-policy",
   {
     role: githubDeployRole.id,
-    policy: frontendBucket.arn.apply((bucketArn) =>
-      JSON.stringify({
-        Version: "2012-10-17",
-        Statement: [
-          {
-            Effect: "Allow",
-            Action: [
-              "s3:ListBucket",
-              "s3:GetBucketLocation",
-            ],
-            Resource: bucketArn,
-          },
-          {
-            Effect: "Allow",
-            Action: [
-              "s3:PutObject",
-              "s3:DeleteObject",
-              "s3:GetObject",
-            ],
-            Resource: `${bucketArn}/*`,
-          },
-        ],
-      })
-    ),
+
+    policy: pulumi.jsonStringify({
+      Version: "2012-10-17",
+      Statement: [
+        {
+          Effect: "Allow",
+          Action: [
+            "s3:ListBucket",
+            "s3:GetBucketLocation",
+          ],
+          Resource: frontendBucket.arn,
+        },
+        {
+          Effect: "Allow",
+          Action: [
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:GetObject",
+          ],
+          Resource: pulumi.interpolate`${frontendBucket.arn}/*`,
+        },
+        {
+          Effect: "Allow",
+          Action: [
+            "sns:Publish",
+          ],
+          Resource: deploymentAlertsTopic.arn,
+        },
+      ],
+    }),
   }
 );
 
 export const githubDeployRoleArn = githubDeployRole.arn;
+
+
+const backendLogGroup = new aws.cloudwatch.LogGroup("backend-log-group", {
+  name: "/cloud-cicd/backend",
+  retentionInDays: 7,
+});
+
+const ec2CpuAlarm = new aws.cloudwatch.MetricAlarm("ec2-high-cpu", {
+  alarmDescription: "Alert when backend EC2 CPU exceeds 80%",
+  namespace: "AWS/EC2",
+  metricName: "CPUUtilization",
+  statistic: "Average",
+  period: 300,
+  evaluationPeriods: 2,
+  threshold: 80,
+  comparisonOperator: "GreaterThanThreshold",
+  dimensions: {
+    InstanceId: backendInstance.id,
+  },
+  treatMissingData: "notBreaching",
+});
+
+const rdsConnectionAlarm = new aws.cloudwatch.MetricAlarm(
+  "rds-high-connections",
+  {
+    alarmDescription: "Alert when RDS connections exceed threshold",
+    namespace: "AWS/RDS",
+    metricName: "DatabaseConnections",
+    statistic: "Average",
+    period: 300,
+    evaluationPeriods: 2,
+    threshold: 20,
+    comparisonOperator: "GreaterThanThreshold",
+    dimensions: {
+      DBInstanceIdentifier: database.identifier,
+    },
+    treatMissingData: "notBreaching",
+  }
+);
+
+export const backendLogGroupName = backendLogGroup.name;
+export const ec2CpuAlarmName = ec2CpuAlarm.name;
+export const rdsConnectionAlarmName = rdsConnectionAlarm.name;
+
+
+const backendLogsPolicy = new aws.iam.RolePolicy("backend-logs-policy", {
+  role: ec2Role.id,
+  policy: backendLogGroup.arn.apply((logGroupArn) =>
+    JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [
+        {
+          Effect: "Allow",
+          Action: [
+            "logs:CreateLogStream",
+            "logs:PutLogEvents",
+          ],
+          Resource: `${logGroupArn}:*`,
+        },
+      ],
+    })
+  ),
+});
+
+export const backendLogsPolicyId = backendLogsPolicy.id;
+
+
+
+export const deploymentAlertsTopicArn = deploymentAlertsTopic.arn;
