@@ -215,3 +215,32 @@ jobs:
               exit 1
             fi
           REMOTE
+
+  notify-failure:
+    name: Notify Deployment Failure
+    needs:
+      - test
+      - deploy-frontend
+      - deploy-backend
+
+    if: ${{ always() && (needs.test.result == 'failure' || needs.deploy-frontend.result == 'failure' || needs.deploy-backend.result == 'failure') }}
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Send deployment failure notification
+        run: |
+          aws sns publish \
+            --topic-arn "${{ secrets.SNS_TOPIC_ARN }}" \
+            --subject "Cloud CI/CD deployment failed" \
+            --message "Deployment failed for ${{ github.repository }} on branch ${{ github.ref_name }}. Commit: ${{ github.sha }}. Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
