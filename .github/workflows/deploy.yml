@@ -82,23 +82,6 @@ jobs:
           REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
         run: npm run build
 
-      - name: Inspect GitHub OIDC subject
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const payload = JSON.parse(
-              Buffer.from(token.split('.')[1], 'base64').toString()
-            );
-
-            console.log("OIDC sub:", payload.sub);
-            console.log("OIDC aud:", payload.aud);
-
-      - name: Inspect OIDC token
-        uses: github/actions-oidc-debugger@main
-        with:
-          audience: sts.amazonaws.com
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
